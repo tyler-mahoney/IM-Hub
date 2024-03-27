@@ -1,0 +1,182 @@
+---
+title: "Data Visualization"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code.
+
+# Download some data from USGS NWIS site.
+
+```{r}
+library(dataRetrieval)
+library(ggplot2)
+library(latticeExtra)
+library(zoo)
+library(lubridate)
+
+siteNumber <- "03293500"
+beargrassInfo <- readNWISsite(siteNumber)
+
+flow.data <- readNWISuv(siteNumbers=siteNumber,parameterCd=c("00060","00095"),"2023-03-22", "2024-03-21")
+
+```
+
+# What does this data look like? Does it tell a story?
+
+```{r}
+head(flow.data,n=10L)
+```
+# It's difficult to tell anything as the data stands. Let's rename some of the columns to make it a bit easier to read. 
+```{r}
+colnames(flow.data) <- c('collection_agency','site_number','date_time','discharge','discharge_approval','sp_conductivity','sp_conductivity_approval','time_zone')
+
+head(flow.data,10L)
+```
+# This is a bit easier read. But it's still difficult to extract a story.
+
+# Let's plot this data
+
+```{r}
+
+ 
+# create data
+x <- flow.data$date_time
+var1 <- flow.data$discharge
+var2 <- flow.data$sp_conductivity
+data <- data.frame(x,var1,var2)
+ 
+ 
+# --> construct separate plots for each series
+obj1 <- xyplot(var1 ~ x, data, type = "l" , lwd=2,ylab='Discharge', xlab = "")
+obj2 <- xyplot(var2 ~ x, data, type = "l", lwd=2,ylab='Sp. Conductivity' )
+ 
+# --> Make the plot with second y axis:
+doubleYScale(obj1, obj2, add.ylab2 = TRUE,  text = c("Discharge","Sp. Conductivity") )
+
+```
+
+# Let's dig into our data a bit more.
+
+```{r}
+# basic histogram
+hist.sp.cond <- ggplot(flow.data, aes(x=sp_conductivity)) + 
+  geom_histogram( binwidth=50, fill="#69b3a2", color="#e9ecef",) + xlab('Specific Conductance (uS/cm)')  + theme_bw() + ggtitle('Specific conductivity histogram')
+
+hist.flow <- ggplot(flow.data, aes(x=discharge)) + 
+  geom_histogram( binwidth=25, fill="blue", color="grey",) + xlab('Flowrate (cfs)')  + theme_bw()  + ggtitle('Discharge histogram')
+
+hist.flow.log <- ggplot(flow.data, aes(x=discharge)) + 
+  geom_histogram( fill="blue", color="grey",) + xlab('Flowrate (cfs)') + scale_x_log10() + theme_bw() + ggtitle('Log discharge histogram')
+
+hist.sp.cond
+
+hist.flow
+
+hist.flow.log
+```
+
+# How do flow data and specific conductance interact?
+
+```{r}
+ggplot(flow.data, aes(x=discharge, y=sp_conductivity) ) + scale_x_log10() +
+  geom_bin2d(bins=70) + scale_fill_continuous(type='viridis') +
+  theme_bw() + xlab('Discharge (cfs)') + ylab('Sp. Conductivity (us/cm)') + ggtitle('2D histogram')
+
+```
+
+# Let's zoom in here
+
+```{r}
+# Area + contour
+ggplot(flow.data, aes(x=discharge, y=sp_conductivity) ) + scale_x_log10()+
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour="white") + theme_bw() + ggtitle('Contoured density plot')
+```
+
+# Now, let's go back to our data and look more deeply at what it's trying to tell us (i.e., what the story is)
+
+```{r}
+doubleYScale(obj1, obj2, add.ylab2 = TRUE,  text = c("Discharge","Sp. Conductivity") )
+```
+
+# What is typical?
+
+Most of the time, it looks like discharge and Sp. Conductivity are inversely related. Let look at just one event (at the end of March)
+
+```{r}
+start.date <- which(flow.data$date_time=='2023-03-23 00:00:00')
+end.date <- which(flow.data$date_time=='2023-03-26 00:00:00')
+
+march.event <- flow.data[start.date:end.date,]
+
+head(march.event)
+tail(march.event)
+
+```
+# What does this look like as a time series? 
+```{r}
+
+x.march <- march.event$date_time
+var1.march <- march.event$discharge
+var2.march <- march.event$sp_conductivity
+data.march <- data.frame(x,var1,var2)
+ 
+ 
+# --> construct separate plots for each series
+obj1.march <- xyplot(var1.march ~ x.march, data.march, type = "l" , lwd=2,ylab='Discharge', xlab = "")
+obj2.march <- xyplot(var2.march ~ x.march, data.march, type = "l", lwd=2,ylab='Sp. Conductivity' )
+doubleYScale(obj1.march, obj2.march, add.ylab2 = TRUE,  text = c("Discharge","Sp. Conductivity") )
+```
+
+# Instead of the normal time series plot, let's look at how Sp. Conductivity varies as discharge varies. 
+```{r}
+
+
+ggplot(data=march.event,aes(x=discharge,sp_conductivity)) + geom_point() + geom_segment(aes(
+                    xend=c(tail(discharge, n=-1), NA), 
+                    yend=c(tail(sp_conductivity, n=-1), NA)),
+                    arrow=arrow(length=unit(0.3,'cm'))) + xlab('Discharge (cms)') + ylab('Sp. Conductivity (uS/cm)')+theme_bw()
+```
+
+# Here we see that as our flow increases, the specific conductivity tends to decrease? 
+Why is this? Well sp. conducitivity is often used as a *proxy* for how much dissolved material is in the water. Rainfall - which contributes to increases in discharge usually doesn't have too much dissolved material. So this makes sense.
+
+But do *all* of the events look like this? 
+
+```{r}
+doubleYScale(obj1, obj2, add.ylab2 = TRUE,  text = c("Discharge","Sp. Conductivity") )
+```
+# Hmm. The event in late January appears to be a bit different. Let's zoom into it. 
+
+```{r}
+start.date <- which(flow.data$date_time=='2024-01-23 00:00:00')
+end.date <- which(flow.data$date_time=='2024-01-26 00:00:00')
+
+jan.event <- flow.data[start.date:end.date,]
+
+x.jan <- jan.event$date_time
+var1.jan <- jan.event$discharge
+var2.jan <- jan.event$sp_conductivity
+data.jan <- data.frame(x,var1,var2)
+ 
+ 
+# --> construct separate plots for each series
+obj1.jan <- xyplot(var1.jan ~ x.jan, data.jan, type = "l" , lwd=2,ylab='Discharge', xlab = "")
+obj2.jan <- xyplot(var2.jan ~ x.jan, data.jan, type = "l", lwd=2,ylab='Sp. Conductivity' )
+doubleYScale(obj1.jan, obj2.jan, add.ylab2 = TRUE,  text = c("Discharge","Sp. Conductivity") )
+```
+
+# What's going on there? This doesn't look like the normal relationship we see? 
+
+How does Sp. Conductivity vary with discharge here? 
+
+```{r}
+
+ggplot(data=jan.event,aes(x=discharge,sp_conductivity)) + geom_point() + geom_segment(aes(
+                    xend=c(tail(discharge, n=-1), NA), 
+                    yend=c(tail(sp_conductivity, n=-1), NA)),
+                    arrow=arrow(length=unit(0.3,'cm'))) + xlab('Discharge (cms)') + ylab('Sp. Conductivity (uS/cm)')+theme_bw()
+```
+
+# Now we see that Sp. Conductivity *increases* as Q increases for this one event. This is a completely different relationship! Now we have an interesting story. 
+
+Let's think, why would there be an increase in dissolved materials during this one time in January? 
